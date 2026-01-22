@@ -3,7 +3,11 @@
 
 use panic_halt as _;
 
-use crate::{hal::arduino::get_arduino_stepper, stepper::stepper::Direction};
+use crate::stepper::resolution::Resolution;
+use crate::{
+    hal::arduino::get_arduino_stepper,
+    stepper::{resolution::SetStepResolution, stepper::Direction},
+};
 
 pub mod hal;
 pub mod stepper;
@@ -12,21 +16,31 @@ pub mod stepper;
 fn main() -> ! {
     let steps_per_revolution = 200;
 
-    let mut stepper = get_arduino_stepper();
+    let mut stepperino = get_arduino_stepper();
+
+    #[cfg(feature = "full")]
+    stepperino.set_step_resolution(stepper::resolution::Resolution::FULL);
+
+    #[cfg(feature = "half")]
+    stepperino.set_step_resolution(stepper::resolution::Resolution::HALF);
+
+    #[cfg(feature = "fourth")]
+    stepperino.set_step_resolution(stepper::resolution::Resolution::FOURTH);
+
+    #[cfg(feature = "sixteenth")]
+    stepperino.set_step_resolution(stepper::resolution::Resolution::SIXTEENTH);
 
     loop {
-        stepper.set_direction(Direction::Cw);
-        for _ in 0..steps_per_revolution {
-            stepper.step().unwrap();
-        }
+        stepperino.set_direction(Direction::Cw);
+        //        for _ in 0..steps_per_revolution {
+        //          stepperino.step().unwrap();
+        //    }
 
         arduino_hal::delay_ms(1000);
 
-        stepper.set_direction(Direction::Ccw);
+        stepperino.set_direction(Direction::Ccw);
 
-        for _ in 0..steps_per_revolution {
-            stepper.step().unwrap()
-        }
+        stepperino.rotate(2);
 
         arduino_hal::delay_ms(1000);
     }

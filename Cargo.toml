@@ -6,30 +6,36 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [[bin]]
+bench = false
 name = "window-controller"
 test = false
-bench = false
 
 [dependencies]
+embedded-hal = "1.0"
+nb = "1.1.0"
 panic-halt = "1.0.0"
 ufmt = "0.2.0"
-nb = "1.1.0"
-embedded-hal = "1.0"
 
 [dependencies.arduino-hal]
 git = "https://github.com/rahix/avr-hal"
-rev = "5ccdd12d724d5b65273eb33a27cb55ab2ddcc865"
+rev = "e5c8f37fe48419956e722490a82b9ca9b9fc61a2"
 features = ["arduino-uno"]
+
+[features]
+fourth = []
+full = []
+half = []
+sixteenth = []
 
 # Configure the build for minimal size - AVRs have very little program memory
 [profile.dev]
-panic = "abort"
-lto = true
 opt-level = "s"
+lto = true
+panic = "abort"
 
 [profile.release]
-panic = "abort"
-codegen-units = 1
+opt-level = "s"
 debug = true
 lto = true
-opt-level = "s"
+panic = "abort"
+codegen-units = 1
