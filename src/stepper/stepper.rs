@@ -16,12 +16,13 @@ pub enum Direction {
 pub struct Stepper<STEP, DIR, DELAY, MODE = NoStepModeControl> {
     /// Direction of spin: -1 or 1
     pub direction: Direction,
-    /// Speed in ???
-    pub speed: u32,
+    /// Speed in rms
+    pub speed_rpm: u32,
     /// Step resolution, how small each step is
     pub resolution: Resolution,
 
     delay: DELAY,
+    min_delay_us: u32,
     steps_per_revolution: u32,
     step_pin: STEP,
     direction_pin: DIR,
@@ -37,17 +38,19 @@ where
 {
     pub fn new(step_pin: STEP, direction_pin: DIR, delay: DELAY) -> Self {
         let direction = Direction::Cw;
-        let speed = 2;
+        let speed = 120;
         let resolution = Resolution::FULL;
-        let steps_per_revolution = 100;
+        let steps_per_revolution = 200;
+        let min_delay_us = 50;
         Self {
             direction,
-            speed,
+            speed_rpm: speed,
             resolution,
             step_pin,
             direction_pin,
             steps_per_revolution,
             delay,
+            min_delay_us,
             mode: NoStepModeControl,
         }
     }
@@ -71,12 +74,13 @@ where
     ) -> Self::WithStepModeControl {
         Stepper {
             direction: self.direction,
-            speed: self.speed,
+            speed_rpm: self.speed_rpm,
             resolution: self.resolution,
             delay: self.delay,
             steps_per_revolution: self.steps_per_revolution,
             step_pin: self.step_pin,
             direction_pin: self.direction_pin,
+            min_delay_us: self.min_delay_us,
             mode: WithStepResolutionControl { pins: res },
         }
     }
@@ -118,7 +122,7 @@ where
     pub fn rotate(&mut self, rotations: u32) -> Result<(), STEP::Error> {
         let steps = self.steps_for_rotations(rotations);
         for _ in 0..steps {
-            self.step(delay(steps))?;
+            self.step(self.delay(steps))?;
         }
 
         Ok(())
@@ -131,9 +135,9 @@ where
         }?;
 
         self.step_pin.set_high()?;
-        self.delay.delay_ms(delay);
+        self.delay.delay_us(delay);
         self.step_pin.set_low()?;
-        self.delay.delay_ms(delay);
+        self.delay.delay_us(delay);
         Ok(())
     }
 
@@ -141,7 +145,7 @@ where
         self.direction = direction;
     }
     pub fn set_speed(&mut self, speed: u32) {
-        self.speed = speed;
+        self.speed_rpm = speed;
     }
     pub fn set_resolution(&mut self, resolution: Resolution) {
         self.resolution = resolution;
@@ -156,7 +160,13 @@ where
         };
         rotations * self.steps_per_revolution * micro
     }
-}
-fn delay(steps: u32) -> u32 {
-    60000 / steps / 2
+    fn delay(&self, steps: u32) -> u32 {
+        let min_delay = 50;
+        let requested_delay_microseconds = 60000000 / steps / 2 / self.speed_rpm;
+        if requested_delay_microseconds < min_delay {
+            min_delay
+        } else {
+            requested_delay_microseconds
+        }
+    }
 }

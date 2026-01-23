@@ -14,8 +14,6 @@ pub mod stepper;
 
 #[arduino_hal::entry]
 fn main() -> ! {
-    let steps_per_revolution = 200;
-
     let mut stepperino = get_arduino_stepper();
 
     #[cfg(feature = "full")]
