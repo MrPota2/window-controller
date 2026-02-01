@@ -2,9 +2,13 @@
 
 use embedded_hal::{delay::DelayNs, digital::OutputPin};
 
-use crate::stepper::resolution::{
-    get_pin_settings_from, EnableStepModeControl, MicroStepPins, NoStepModeControl, Resolution,
-    ResolutionMatrix, SetStepResolution, WithStepResolutionControl,
+use crate::stepper::{
+    resolution::{
+        get_pin_settings_from, EnableStepModeControl, MicroStepPins, NoStepModeControl, Resolution,
+        ResolutionMatrix, SetStepResolution, WithStepResolutionControl,
+    },
+    speed::FixedSpeed,
+    speed::SpeedSource,
 };
 
 #[derive(Clone, Copy)]
@@ -13,13 +17,13 @@ pub enum Direction {
     Ccw,
 }
 
-pub struct Stepper<STEP, DIR, DELAY, MODE = NoStepModeControl> {
+pub struct Stepper<STEP, DIR, DELAY, SPEED, MODE = NoStepModeControl> {
     /// Direction of spin: -1 or 1
     pub direction: Direction,
-    /// Speed in rms
-    pub speed_rpm: u32,
     /// Step resolution, how small each step is
     pub resolution: Resolution,
+    /// Speed in rpms
+    pub speed_rpm: SPEED,
 
     delay: DELAY,
     min_delay_us: u32,
@@ -30,21 +34,20 @@ pub struct Stepper<STEP, DIR, DELAY, MODE = NoStepModeControl> {
     mode: MODE,
 }
 
-impl<STEP, DIR, DELAY, E> Stepper<STEP, DIR, DELAY, NoStepModeControl>
+impl<STEP, DIR, DELAY, SPEED, E> Stepper<STEP, DIR, DELAY, SPEED, NoStepModeControl>
 where
     STEP: OutputPin<Error = E>,
     DIR: OutputPin<Error = E>,
     DELAY: DelayNs,
 {
-    pub fn new(step_pin: STEP, direction_pin: DIR, delay: DELAY) -> Self {
+    pub fn new(step_pin: STEP, direction_pin: DIR, delay: DELAY, speed_rpm: SPEED) -> Self {
         let direction = Direction::Cw;
-        let speed = 120;
         let resolution = Resolution::FULL;
         let steps_per_revolution = 200;
         let min_delay_us = 50;
         Self {
             direction,
-            speed_rpm: speed,
+            speed_rpm,
             resolution,
             step_pin,
             direction_pin,
@@ -56,17 +59,20 @@ where
     }
 }
 
-impl<STEP, DIR, DELAY, E, MS1, MS2, MS3> EnableStepModeControl<MicroStepPins<MS1, MS2, MS3>, E>
-    for Stepper<STEP, DIR, DELAY, NoStepModeControl>
+impl<STEP, DIR, DELAY, SPEED, E, MS1, MS2, MS3>
+    EnableStepModeControl<MicroStepPins<MS1, MS2, MS3>, E>
+    for Stepper<STEP, DIR, DELAY, SPEED, NoStepModeControl>
 where
     STEP: OutputPin<Error = E>,
     DIR: OutputPin<Error = E>,
     DELAY: DelayNs,
+    SPEED: SpeedSource,
     MS1: OutputPin<Error = E>,
     MS2: OutputPin<Error = E>,
     MS3: OutputPin<Error = E>,
 {
-    type WithStepModeControl = Stepper<STEP, DIR, DELAY, WithStepResolutionControl<MS1, MS2, MS3>>;
+    type WithStepModeControl =
+        Stepper<STEP, DIR, DELAY, SPEED, WithStepResolutionControl<MS1, MS2, MS3>>;
 
     fn enable_step_mode_control(
         self,
@@ -74,20 +80,20 @@ where
     ) -> Self::WithStepModeControl {
         Stepper {
             direction: self.direction,
-            speed_rpm: self.speed_rpm,
             resolution: self.resolution,
             delay: self.delay,
             steps_per_revolution: self.steps_per_revolution,
             step_pin: self.step_pin,
             direction_pin: self.direction_pin,
             min_delay_us: self.min_delay_us,
+            speed_rpm: self.speed_rpm,
             mode: WithStepResolutionControl { pins: res },
         }
     }
 }
 
-impl<STEP, DIR, DELAY, E, MS1, MS2, MS3> SetStepResolution<E>
-    for Stepper<STEP, DIR, DELAY, WithStepResolutionControl<MS1, MS2, MS3>>
+impl<STEP, DIR, DELAY, SPEED, E, MS1, MS2, MS3> SetStepResolution<E>
+    for Stepper<STEP, DIR, DELAY, SPEED, WithStepResolutionControl<MS1, MS2, MS3>>
 where
     MS1: OutputPin<Error = E>,
     MS2: OutputPin<Error = E>,
@@ -113,18 +119,30 @@ where
     }
 }
 
-impl<STEP, DIR, DELAY, MODE, E> Stepper<STEP, DIR, DELAY, MODE>
+impl<STEP, DIR, DELAY, MODE, E> Stepper<STEP, DIR, DELAY, FixedSpeed, MODE>
 where
     STEP: OutputPin<Error = E>,
     DIR: OutputPin<Error = E>,
     DELAY: DelayNs,
 {
+    pub fn set_speed(&mut self, speed: u32) {
+        self.speed_rpm.0 = speed;
+    }
+}
+
+impl<STEP, DIR, DELAY, SPEED, MODE, E> Stepper<STEP, DIR, DELAY, SPEED, MODE>
+where
+    STEP: OutputPin<Error = E>,
+    DIR: OutputPin<Error = E>,
+    DELAY: DelayNs,
+    SPEED: SpeedSource,
+{
     pub fn rotate(&mut self, rotations: u32) -> Result<(), STEP::Error> {
         let steps = self.steps_for_rotations(rotations);
         for _ in 0..steps {
-            self.step(self.delay(steps))?;
+            let delay = self.delay(steps);
+            self.step(delay)?;
         }
-
         Ok(())
     }
 
@@ -144,9 +162,6 @@ where
     pub fn set_direction(&mut self, direction: Direction) {
         self.direction = direction;
     }
-    pub fn set_speed(&mut self, speed: u32) {
-        self.speed_rpm = speed;
-    }
     pub fn set_resolution(&mut self, resolution: Resolution) {
         self.resolution = resolution;
     }
@@ -160,13 +175,14 @@ where
         };
         rotations * self.steps_per_revolution * micro
     }
-    fn delay(&self, steps: u32) -> u32 {
-        let min_delay = 50;
-        let requested_delay_microseconds = 60000000 / steps / 2 / self.speed_rpm;
-        if requested_delay_microseconds < min_delay {
-            min_delay
-        } else {
-            requested_delay_microseconds
+    fn delay(&mut self, steps: u32) -> u32 {
+        let speed_rpm = self.speed_rpm.speed_rpm();
+        match speed_rpm {
+            Ok(r) => {
+                let microseconds_in_a_minute = 60 * 1000000;
+                microseconds_in_a_minute / steps / 2 / r
+            }
+            Err(_) => self.min_delay_us,
         }
     }
 }

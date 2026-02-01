@@ -3,13 +3,10 @@
 
 use panic_halt as _;
 
-use crate::stepper::resolution::Resolution;
-use crate::{
-    hal::arduino::get_arduino_stepper,
-    stepper::{resolution::SetStepResolution, stepper::Direction},
-};
+use crate::{hal::arduino::arduino::get_arduino_stepper, stepper::stepper::Direction};
 
 pub mod hal;
+pub mod input;
 pub mod stepper;
 
 #[arduino_hal::entry]
@@ -38,7 +35,7 @@ fn main() -> ! {
 
         stepperino.set_direction(Direction::Ccw);
 
-        stepperino.rotate(2);
+        stepperino.rotate(2).unwrap_or_default();
 
         arduino_hal::delay_ms(1000);
     }
